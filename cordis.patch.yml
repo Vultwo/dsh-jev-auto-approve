@@ -1,0 +1,12 @@
+# Jev Auto-Approve: a custom Host bundle for this profile.
+#
+# The plugin reviews approval requests with TypeSafe Jev. It does not change
+# the session permission preset: the workspace sandbox and the `ask` policy
+# stay in force, and only a passing Jev review answers an approval request
+# with `allowed-once`. Everything else still reaches the normal human prompt.
+- insert:
+    - id: jev-auto-approve
+      name: 'dsh-jev-auto-approve'
+      config:
+        enabled: true
+        mode: enforce

@@ -1,0 +1,65 @@
+{
+  "name": "dsh-jev-auto-approve",
+  "version": "0.2.3",
+  "description": "Jev-backed auto-approval for DeepSeek Harness: reviews approval requests with TypeSafe Jev, auto-approves low-risk authorized actions, and ships an English settings page for the key and token/cost stats.",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "lib",
+    "client.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md",
+    "LICENSE"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-plugin-manager",
+        "@deepseek-ai/dsh-api-remotes"
+      ]
+    }
+  },
+  "keywords": [
+    "deepseek",
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "jev",
+    "typesafe",
+    "approval",
+    "auto-approve",
+    "permissions",
+    "security"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Vultwo/dsh-jev-auto-approve.git"
+  },
+  "homepage": "https://github.com/Vultwo/dsh-jev-auto-approve#readme",
+  "bugs": {
+    "url": "https://github.com/Vultwo/dsh-jev-auto-approve/issues"
+  },
+  "author": "Nino Kroesen",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.3.0"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  }
+}
