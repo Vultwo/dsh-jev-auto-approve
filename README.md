@@ -13,6 +13,12 @@ Actions the plugin does not approve still reach the normal human prompt.
 
 ## Install
 
+Install from npm:
+
+```sh
+dsh plugin --profile web add dsh-jev-auto-approve
+```
+
 Install directly from GitHub:
 
 ```sh

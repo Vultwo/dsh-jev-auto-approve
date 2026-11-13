@@ -1,6 +1,6 @@
 {
   "name": "dsh-jev-auto-approve",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "Jev-backed auto-approval for DeepSeek Harness: reviews approval requests with TypeSafe Jev, auto-approves low-risk authorized actions, and ships an English settings page for the key and token/cost stats.",
   "type": "module",
   "main": "lib/index.js",

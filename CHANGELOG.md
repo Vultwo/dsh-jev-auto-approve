@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.4
+
+- First npm release through staged publishing; no plugin behavior changes.
+- Document the npm install command.
+
 ## 0.2.3
 
 - Fix cold-start route registration by waiting for the `webServer` and
