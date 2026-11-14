@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.5
+
+- Auto-approve read-only `plugin_manager` actions `list_plugins` and `list_bundles` without a Jev call; configurable with `allowReadOnlyPluginManager`.
+
 ## 0.2.4
 
 - First npm release through staged publishing; no plugin behavior changes.

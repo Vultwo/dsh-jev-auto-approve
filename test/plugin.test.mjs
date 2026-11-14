@@ -107,6 +107,7 @@ test('approval listener auto-approves a passing review and registers /jev-auto',
         apply(ctx, {
           enabled: true,
           mode: 'enforce',
+          allowReadOnlyPluginManager: false,
           baseURL: `http://127.0.0.1:${port}`,
           apiKey: 'test-key',
           logFile: join(dir, 'decisions.jsonl'),
@@ -141,6 +142,7 @@ test('shadow mode logs but delegates to the human', async () => {
         apply(ctx, {
           enabled: true,
           mode: 'shadow',
+          allowReadOnlyPluginManager: false,
           baseURL: `http://127.0.0.1:${port}`,
           apiKey: 'test-key',
           logFile: join(dir, 'decisions.jsonl'),
@@ -175,6 +177,7 @@ test('a failing review delegates to the human', async () => {
         apply(ctx, {
           enabled: true,
           mode: 'enforce',
+          allowReadOnlyPluginManager: false,
           baseURL: `http://127.0.0.1:${port}`,
           apiKey: 'test-key',
           logFile: join(dir, 'decisions.jsonl'),
@@ -215,6 +218,31 @@ test('a missing key delegates to the human', async () => {
     assert.equal(nextCalled, true);
     const log = await readFile(join(dir, 'decisions.jsonl'), 'utf8');
     assert.match(log, /"outcome":"no-key"/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('read-only plugin_manager actions auto-approve without a Jev call', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'jev-auto-approve-'));
+  try {
+    const { ctx, listeners } = makeCtx();
+    apply(ctx, {
+      enabled: true,
+      mode: 'enforce',
+      baseURL: 'http://127.0.0.1:1',
+      apiKey: 'test-key',
+      logFile: join(dir, 'decisions.jsonl'),
+    });
+    let nextCalled = false;
+    const outcome = await listeners.get('approval/request')(fakeRequest(), async () => {
+      nextCalled = true;
+      return 'unavailable';
+    });
+    assert.equal(outcome, 'allowed-once');
+    assert.equal(nextCalled, false);
+    const log = await readFile(join(dir, 'decisions.jsonl'), 'utf8');
+    assert.match(log, /"outcome":"allowed-readonly"/);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

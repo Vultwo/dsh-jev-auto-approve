@@ -71,6 +71,7 @@ questions:
 - Any gate fails, the key is missing, Jev errors, or the review times out -> the
   plugin delegates to the normal human approval prompt.
 - `mode: shadow` logs what it would do but always delegates to the human.
+- Read-only `plugin_manager` actions (`list_plugins`, `list_bundles`) take a deterministic fast path and are auto-approved without a Jev call. Set `allowReadOnlyPluginManager: false` to review them with Jev like every other action.
 
 The plugin reviews approval requests only. Ordinary workspace operations that
 do not need approval are unaffected, and the plugin cannot override a `never`
@@ -95,6 +96,7 @@ and shows usage. All fields are optional.
 | `irreversibleMax` | `0.15` | Maximum `irreversible` probability. |
 | `authorizedThreshold` | `0.80` | Minimum `authorized` probability. |
 | `includeUserMessage` | `true` | Include the most recent user message in the review state. |
+| `allowReadOnlyPluginManager` | `true` | Auto-approve `plugin_manager` actions `list_plugins` and `list_bundles` without a Jev call. |
 | `logFile` | `~/.dsh/jev-auto-approve.jsonl` | Append-only JSONL decision log. |
 
 ## Commands
