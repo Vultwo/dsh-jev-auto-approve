@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { classify, decide, parseScores, pingJev } from '../lib/classify.js';
+import { DEFAULT_QUESTIONS, QUESTION_NAMES, classify, decide, parseScores, pingJev } from '../lib/classify.js';
 
 function response(body, status = 200) {
   return {
@@ -11,47 +11,75 @@ function response(body, status = 200) {
 }
 
 const passing = {
-  safe: { type: 'noul', noul: 0.96 },
-  irreversible: { type: 'noul', noul: 0.03 },
+  destructive: { type: 'noul', noul: 0.03 },
+  exfiltration: { type: 'noul', noul: 0.02 },
+  security_mode: { type: 'noul', noul: 0.04 },
   authorized: { type: 'noul', noul: 0.91 },
 };
 
+const passingScores = { destructive: 0.03, exfiltration: 0.02, security_mode: 0.04, authorized: 0.91 };
+
+test('the question set is four narrow judgements', () => {
+  assert.deepEqual(QUESTION_NAMES, ['destructive', 'exfiltration', 'security_mode', 'authorized']);
+  for (const name of QUESTION_NAMES) {
+    assert.equal(DEFAULT_QUESTIONS[name].type, 'noul');
+  }
+});
+
 test('decide allows when every gate passes', () => {
-  const result = decide({ safe: 0.96, irreversible: 0.03, authorized: 0.91 }, {});
+  const result = decide(passingScores, {});
   assert.equal(result.action, 'allow');
 });
 
-test('decide asks when safe is below threshold', () => {
-  const result = decide({ safe: 0.5, irreversible: 0.03, authorized: 0.91 }, {});
-  assert.equal(result.action, 'ask');
-  assert.match(result.reason, /safe/);
+test('decide allows an authorized plugin toggle that the old safe gate blocked', () => {
+  const result = decide({ destructive: 0.12, exfiltration: 0.02, security_mode: 0.19, authorized: 0.88 }, {});
+  assert.equal(result.action, 'allow');
 });
 
-test('decide asks when irreversible is above threshold', () => {
-  const result = decide({ safe: 0.96, irreversible: 0.4, authorized: 0.91 }, {});
+test('decide asks when destructive is above threshold', () => {
+  const result = decide({ ...passingScores, destructive: 0.4 }, {});
   assert.equal(result.action, 'ask');
-  assert.match(result.reason, /irreversible/);
+  assert.match(result.reason, /^destructive/);
 });
 
-test('decide asks when authorized is below threshold', () => {
-  const result = decide({ safe: 0.96, irreversible: 0.03, authorized: 0.2 }, {});
+test('decide asks when exfiltration is above threshold', () => {
+  const result = decide({ ...passingScores, exfiltration: 0.5 }, {});
   assert.equal(result.action, 'ask');
-  assert.match(result.reason, /authorized/);
+  assert.match(result.reason, /^exfiltration/);
+});
+
+test('decide asks when the security posture would change', () => {
+  const result = decide({ ...passingScores, security_mode: 0.7 }, {});
+  assert.equal(result.action, 'ask');
+  assert.match(result.reason, /^security_mode/);
+});
+
+test('decide asks when the user did not authorize the call', () => {
+  const result = decide({ ...passingScores, authorized: 0.2 }, {});
+  assert.equal(result.action, 'ask');
+  assert.match(result.reason, /^authorized/);
+});
+
+test('decide honors configured thresholds', () => {
+  assert.equal(decide({ ...passingScores, authorized: 0.88 }, { authorizedThreshold: 0.9 }).action, 'ask');
+  assert.equal(decide({ ...passingScores, destructive: 0.4 }, { destructiveMax: 0.5 }).action, 'allow');
 });
 
 test('decide asks on missing scores', () => {
-  assert.equal(decide({ safe: 0.96 }, {}).action, 'ask');
+  assert.equal(decide({ destructive: 0.03 }, {}).action, 'ask');
   assert.equal(decide(null, {}).action, 'ask');
 });
 
+test('decide asks when a retired question name is supplied', () => {
+  const result = decide({ safe: 0.96, irreversible: 0.03, authorized: 0.91 }, {});
+  assert.equal(result.action, 'ask');
+  assert.match(result.reason, /^missing score: destructive/);
+});
+
 test('parseScores validates noul answers', () => {
-  assert.deepEqual(parseScores({ answers: passing }), {
-    safe: 0.96,
-    irreversible: 0.03,
-    authorized: 0.91,
-  });
-  assert.throws(() => parseScores({ answers: { safe: { type: 'choice', choice: 'yes' } } }));
-  assert.throws(() => parseScores({ answers: { safe: { type: 'noul', noul: 2 } } }));
+  assert.deepEqual(parseScores({ answers: passing }), passingScores);
+  assert.throws(() => parseScores({ answers: { destructive: { type: 'choice', choice: 'yes' } } }));
+  assert.throws(() => parseScores({ answers: { destructive: { type: 'noul', noul: 2 } } }));
 });
 
 test('classify sends the typed questions and returns allow', async () => {
@@ -71,12 +99,11 @@ test('classify sends the typed questions and returns allow', async () => {
   assert.equal(result.action, 'allow');
   assert.equal(result.model, 'jev-test');
   assert.equal(request.init.headers.authorization, 'Bearer secret-key');
-  assert.equal(request.body.questions.safe.type, 'noul');
-  assert.equal(request.body.questions.irreversible.type, 'noul');
-  assert.equal(request.body.questions.authorized.type, 'noul');
+  for (const name of QUESTION_NAMES) {
+    assert.equal(request.body.questions[name].type, 'noul');
+  }
   assert.equal(request.body.state.tool, 'bash');
 });
-
 
 test('classify carries measured usage for the stats page', async () => {
   const fetchFn = async () =>
@@ -100,8 +127,9 @@ test('classify asks when the review gates fail', async () => {
   const fetchFn = async () =>
     response({
       answers: {
-        safe: { type: 'noul', noul: 0.4 },
-        irreversible: { type: 'noul', noul: 0.03 },
+        destructive: { type: 'noul', noul: 0.4 },
+        exfiltration: { type: 'noul', noul: 0.02 },
+        security_mode: { type: 'noul', noul: 0.04 },
         authorized: { type: 'noul', noul: 0.91 },
       },
     });

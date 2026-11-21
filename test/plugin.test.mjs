@@ -4,7 +4,7 @@ import { createServer } from 'node:http';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { apply } from '../lib/index.js';
+import { apply, readLastUserMessage, readSandboxPolicy } from '../lib/index.js';
 
 function makeCtx() {
   const listeners = new Map();
@@ -61,7 +61,7 @@ function fakeRequest(reason = 'escalate sandbox to danger-full-access: plugin_ma
         snapshotEvents: () => [
           {
             type: 'user/message',
-            data: { message: { content: [{ type: 'text', text: 'Please install the plugin.' }] } },
+            data: { content: [{ type: 'text', text: 'Please install the plugin.' }], source: { kind: 'user' } },
           },
           {
             type: 'tool/call',
@@ -92,8 +92,9 @@ async function withServer(answers, fn) {
 }
 
 const passingAnswers = {
-  safe: { type: 'noul', noul: 0.96 },
-  irreversible: { type: 'noul', noul: 0.03 },
+  destructive: { type: 'noul', noul: 0.03 },
+  exfiltration: { type: 'noul', noul: 0.02 },
+  security_mode: { type: 'noul', noul: 0.04 },
   authorized: { type: 'noul', noul: 0.91 },
 };
 
@@ -168,8 +169,9 @@ test('a failing review delegates to the human', async () => {
   try {
     await withServer(
       () => ({
-        safe: { type: 'noul', noul: 0.2 },
-        irreversible: { type: 'noul', noul: 0.8 },
+        destructive: { type: 'noul', noul: 0.8 },
+        exfiltration: { type: 'noul', noul: 0.02 },
+        security_mode: { type: 'noul', noul: 0.04 },
         authorized: { type: 'noul', noul: 0.1 },
       }),
       async (port) => {
@@ -246,4 +248,105 @@ test('read-only plugin_manager actions auto-approve without a Jev call', async (
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+// Event shapes copied from a real DSH session log. The harness writes user text
+// at `data.content` and tags every injected snapshot with `data.source.kind`.
+function sessionOf(events) {
+  return { snapshotEvents: () => events };
+}
+
+function human(text) {
+  return { type: 'user/message', data: { content: [{ type: 'text', text }], source: { kind: 'user' } } };
+}
+
+function timeContext(text) {
+  return { type: 'user/message', data: { content: [{ type: 'text', text }], source: { kind: 'time-context' } } };
+}
+
+function runtimeContext(sections) {
+  return {
+    type: 'user/message',
+    data: { content: [{ type: 'text', text: 'Current runtime context.' }], source: { kind: 'runtime-context', sections } },
+  };
+}
+
+function toolCall(callId) {
+  return { type: 'tool/call', data: { callId, name: 'bash', arguments: '{}' } };
+}
+
+test('readLastUserMessage reads data.content, the shape the harness writes', () => {
+  const session = sessionOf([human('Sync the plugin directory.'), toolCall('c1')]);
+  assert.equal(readLastUserMessage(session, 'c1'), 'Sync the plugin directory.');
+});
+
+test('readLastUserMessage skips injected context', () => {
+  const session = sessionOf([
+    human('Install the research bundle.'),
+    runtimeContext([{ name: 'sandbox:policy', text: 'policy' }]),
+    timeContext('Time sampled while preparing turn 1, step 1.'),
+    toolCall('c1'),
+  ]);
+  assert.equal(readLastUserMessage(session, 'c1'), 'Install the research bundle.');
+});
+
+test('readLastUserMessage ignores a message sent after the tool call', () => {
+  const session = sessionOf([human('Run the tests.'), toolCall('c1'), human('Actually, install the bundle too.')]);
+  assert.equal(readLastUserMessage(session, 'c1'), 'Run the tests.');
+});
+
+test('readLastUserMessage is undefined without a human message in the turn', () => {
+  const session = sessionOf([timeContext('Time sampled.'), toolCall('c1')]);
+  assert.equal(readLastUserMessage(session, 'c1'), undefined);
+});
+
+test('readSandboxPolicy reads the declared sandbox and approval policy', () => {
+  const session = sessionOf([
+    human('hi'),
+    runtimeContext([
+      { name: 'working-directory:current', text: 'ignored' },
+      { name: 'sandbox:policy', text: 'Current DSH file policy: workspace-write.' },
+      { name: 'approval:policy', text: 'Approval prompts are enabled in this session.' },
+    ]),
+  ]);
+  assert.equal(
+    readSandboxPolicy(session),
+    'Current DSH file policy: workspace-write.\nApproval prompts are enabled in this session.',
+  );
+});
+
+test('the review state carries the user message and the sandbox policy', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'jev-auto-approve-'));
+  let reviewed;
+  try {
+    await withServer(
+      (parsed) => {
+        reviewed = parsed.state;
+        return passingAnswers;
+      },
+      async (port) => {
+        const { ctx, listeners } = makeCtx();
+        apply(ctx, {
+          enabled: true,
+          mode: 'enforce',
+          allowReadOnlyPluginManager: false,
+          baseURL: `http://127.0.0.1:${port}`,
+          apiKey: 'test-key',
+          logFile: join(dir, 'decisions.jsonl'),
+        });
+        const request = fakeRequest();
+        request.agent.session = sessionOf([
+          human('Please install the plugin.'),
+          runtimeContext([{ name: 'sandbox:policy', text: 'Current DSH file policy: workspace-write.' }]),
+          timeContext('Time sampled.'),
+          toolCall('call_1'),
+        ]);
+        await listeners.get('approval/request')(request, async () => 'unavailable');
+      },
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+  assert.equal(reviewed.userMessage, 'Please install the plugin.');
+  assert.equal(reviewed.sandboxPolicy, 'Current DSH file policy: workspace-write.');
 });

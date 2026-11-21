@@ -3,9 +3,10 @@
 Jev-backed auto-approval for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`).
 
 The plugin asks [TypeSafe Jev](https://typesafe.ai/) whether a pending approval
-request is safe to run, and answers it with `allowed-once` when the review
-passes. It does **not** change the session permission preset or the sandbox.
-Actions the plugin does not approve still reach the normal human prompt.
+request is authorized and not destructive, and answers it with `allowed-once`
+when the review passes. It does **not** change the session permission preset or
+the sandbox. Actions the plugin does not approve still reach the normal human
+prompt.
 
 > **Experimental.** Jev is an external model and can be wrong or manipulated by
 > text in tool arguments. Auto-approval is a convenience, not a security
@@ -58,20 +59,32 @@ Fallbacks for headless or unattended use:
 
 ## Behavior
 
-For each approval request the plugin sends Jev three calibrated yes/no
-questions:
+For each approval request the plugin sends Jev four calibrated yes/no
+questions. Each one is a single narrow judgement: a `noul` over a conjunction of
+conditions scores near its weakest conjunct, which makes the whole review
+useless.
 
 | Question | Meaning | Default gate |
 |---|---|---|
-| `safe` | The action is reversible or clearly intended, and does not destroy data, exfiltrate secrets, force-push, or change security settings. | `>= 0.85` |
-| `irreversible` | If the action goes wrong, it would irreversibly delete or overwrite pre-existing data, or make a hard-to-undo external change. | `<= 0.15` |
-| `authorized` | The current user instruction or task context clearly authorizes this exact operation, target, and scope. | `>= 0.80` |
+| `destructive` | Executing the call would delete, truncate, or overwrite data that already existed and cannot be regenerated. | `<= 0.15` |
+| `exfiltration` | The call sends file contents, environment variables, credentials, or tokens to a destination outside this machine. | `<= 0.10` |
+| `security_mode` | The call changes the harness's permission or sandbox settings, its approval policy, or the agent's credentials. | `<= 0.20` |
+| `authorized` | The user's own message authorizes this exact operation, target, and scope. | `>= 0.80` |
 
-- All three gates pass -> the plugin answers `allowed-once`.
+- Every gate passes -> the plugin answers `allowed-once`.
 - Any gate fails, the key is missing, Jev errors, or the review times out -> the
   plugin delegates to the normal human approval prompt.
 - `mode: shadow` logs what it would do but always delegates to the human.
 - Read-only `plugin_manager` actions (`list_plugins`, `list_bundles`) take a deterministic fast path and are auto-approved without a Jev call. Set `allowReadOnlyPluginManager: false` to review them with Jev like every other action.
+
+The policy is authorization-first. A call that destroys no pre-existing data,
+exports nothing off the machine, and does not change the security posture is
+approved when the user asked for it, including plugin installs and edits outside
+the session workspace. The sandbox still governs what those operations can
+reach; the plugin only decides who answers the approval prompt.
+
+The review state carries the sandbox and approval policy the harness declared
+for the session, so Jev can tell an escalation from a routine call.
 
 The plugin reviews approval requests only. Ordinary workspace operations that
 do not need approval are unaffected, and the plugin cannot override a `never`
@@ -92,10 +105,11 @@ and shows usage. All fields are optional.
 | `apiKeyEnv` | `TYPESAFE_API_KEY` | Environment variable and credential reference fallback. |
 | `apiKeyFile` | `~/.dsh/jev-api-key` | File fallback (one line, the key). |
 | `timeoutMs` | `4000` | Per-review wall-clock budget. |
-| `safeThreshold` | `0.85` | Minimum `safe` probability. |
-| `irreversibleMax` | `0.15` | Maximum `irreversible` probability. |
+| `destructiveMax` | `0.15` | Maximum `destructive` probability. |
+| `exfiltrationMax` | `0.10` | Maximum `exfiltration` probability. |
+| `securityModeMax` | `0.20` | Maximum `security_mode` probability. |
 | `authorizedThreshold` | `0.80` | Minimum `authorized` probability. |
-| `includeUserMessage` | `true` | Include the most recent user message in the review state. |
+| `includeUserMessage` | `true` | Include the user's own most recent message in the review state. |
 | `allowReadOnlyPluginManager` | `true` | Auto-approve `plugin_manager` actions `list_plugins` and `list_bundles` without a Jev call. |
 | `logFile` | `~/.dsh/jev-auto-approve.jsonl` | Append-only JSONL decision log. |
 
@@ -111,17 +125,20 @@ and shows usage. All fields are optional.
 ## What is sent to TypeSafe
 
 The review state contains the tool name, the approval reason, the tool arguments
-(up to 6000 characters), the working directory, and, unless
-`includeUserMessage` is `false`, the most recent user message (up to 1200
-characters). No environment variables, credentials, or full session history are
-sent. The key itself is sent only in the HTTP `Authorization` header.
+(up to 6000 characters), the working directory, the session's sandbox and
+approval policy (up to 800 characters), and, unless `includeUserMessage` is
+`false`, the user's own most recent message (up to 1200 characters). Injected
+harness context, such as time samples, runtime snapshots and skill catalogues, is
+not a user message and is skipped. No environment variables, credentials, or
+full session history are sent. The key itself is sent only in the HTTP
+`Authorization` header.
 
 ## Logs
 
 Each decision appends one JSON line to `logFile`:
 
 ```json
-{"ts":"2026-11-11T15:00:00.000Z","outcome":"allowed","tool":"bash","callId":"call_...","sessionId":"...","mode":"enforce","scores":{"safe":0.96,"irreversible":0.05,"authorized":0.91},"latencyMs":420,"reviewReason":"all thresholds met","keySource":"credentials:TYPESAFE_API_KEY","usage":{"inputTokens":501,"outputTokens":0,"costUsd":0.00002},"cwd":"/path/to/workspace"}
+{"ts":"2026-11-11T15:00:00.000Z","outcome":"allowed","tool":"bash","callId":"call_...","sessionId":"...","mode":"enforce","scores":{"destructive":0.03,"exfiltration":0.01,"security_mode":0.02,"authorized":0.91},"latencyMs":420,"reviewReason":"all thresholds met","keySource":"credentials:TYPESAFE_API_KEY","usage":{"inputTokens":501,"outputTokens":0,"costUsd":0.00002},"cwd":"/path/to/workspace"}
 ```
 
 The log never contains the API key or the full tool arguments.

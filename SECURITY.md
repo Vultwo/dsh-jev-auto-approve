@@ -12,8 +12,11 @@ The review state contains:
 - the approval reason;
 - the tool arguments, truncated to 6000 characters;
 - the session working directory;
-- the most recent user message, truncated to 1200 characters, unless
-  `includeUserMessage` is `false`.
+- the sandbox and approval policy the harness declared for the session,
+  truncated to 800 characters;
+- the user's own most recent message, truncated to 1200 characters, unless
+  `includeUserMessage` is `false`. Injected harness context (time samples,
+  runtime snapshots, skill catalogues) is skipped.
 
 It does not send environment variables, credential values, or the full session
 history. The TypeSafe API key is sent only as the HTTP `Authorization` header.
@@ -42,6 +45,11 @@ Jev is an external model. It can return wrong answers or be influenced by
 content in tool arguments. This plugin is not a sandbox, a security audit, or a
 replacement for reviewing destructive actions. It only reduces approval prompts
 for actions that pass its gates.
+
+Approval does not imply the action stays inside the session workspace. Since
+0.3.0 an authorized call that is not destructive, does not export data off the
+machine and does not change the security posture is approved wherever the
+harness lets it run, including edits to plugin and loader configuration.
 
 ## Reporting
 
